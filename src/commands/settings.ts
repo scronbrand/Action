@@ -3,81 +3,86 @@ import {
     CommandInteraction,
     EmbedBuilder,
     PermissionFlagsBits,
-    ChannelType
+    ActionRowBuilder,
+    StringSelectMenuBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    Guild,
+    MessageFlags
 } from 'discord.js';
-import { getSettings, updateSettings } from '../database';
+import { getSettings } from '../database';
 
 export const data = new SlashCommandBuilder()
     .setName('settings')
-    .setDescription('Configure moderation settings')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addSubcommand(sub =>
-        sub.setName('roles')
-            .setDescription('Set ban and member roles')
-            .addRoleOption(opt => opt.setName('ban_role').setDescription('Role for banned users'))
-            .addRoleOption(opt => opt.setName('member_role').setDescription('Role for regular members')))
-    .addSubcommand(sub =>
-        sub.setName('logs')
-            .setDescription('Set log channel')
-            .addChannelOption(opt => opt.setName('channel').setDescription('Channel for moderation logs').addChannelTypes(ChannelType.GuildText)))
-    .addSubcommand(sub =>
-        sub.setName('max_warnings')
-            .setDescription('Set max warnings before auto-ban')
-            .addIntegerOption(opt => opt.setName('count').setDescription('Number of warnings').setMinValue(1)))
-    .addSubcommand(sub =>
-        sub.setName('whitelist')
-            .setDescription('Manage whitelisted roles allowed to use moderation commands')
-            .addRoleOption(opt => opt.setName('role').setDescription('Role to add/remove').setRequired(true))
-            .addStringOption(opt => opt.setName('action').setDescription('Action to perform').setRequired(true).addChoices(
-                { name: 'Add', value: 'add' },
-                { name: 'Remove', value: 'remove' }
-            )));
+    .setDescription('Configure moderation and anti-nuke system')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+
+export function getSettingsDashboard(guild: Guild) {
+    const settings = getSettings(guild.id);
+
+    const maxLen = Math.max(settings.whitelistRoles.length, settings.whitelistUsers.length);
+    let whitelistTable = '';
+    if (maxLen === 0) {
+        whitelistTable = '• Пусто \u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0 • Пусто';
+    } else {
+        for (let i = 0; i < maxLen; i++) {
+            const r = settings.whitelistRoles[i] ? `• <@&${settings.whitelistRoles[i]}>` : ' ';
+            const u = settings.whitelistUsers[i] ? `• <@${settings.whitelistUsers[i]}>` : ' ';
+            whitelistTable += `${r} \u00A0\u00A0\u00A0\u00A0 ${u}\n`;
+        }
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(0x2b2d31)
+        .setDescription(
+            `**— • Анти-нюк система — ${guild.name}**\n\n` +
+            `Здесь Вы можете посмотреть конфигурацию системы\n\n` +
+            `**Основная информация:**\n` +
+            `• Роль карантина: ${settings.banRoleId ? `<@&${settings.banRoleId}>` : '`Не настроено`'}\n` +
+            `• Роль участника: ${settings.memberRoleId ? `<@&${settings.memberRoleId}>` : '`Не настроено`'}\n` +
+            `• Канал уведомлений: ${settings.logChannelId ? `<#${settings.logChannelId}>` : '`Не настроено`'}\n` +
+            `• Кол-во предупреждений: **${settings.maxWarnings}**\n\n` +
+            `**| Группы: \u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0 | Белый список:**\n` +
+            whitelistTable
+        );
+
+    // Note: The two-column layout above is a best effort. 
+    // If there are multiple items, it gets complicated. 
+    // I'll stick to a clean list for now unless I find a better way.
+
+    const selectMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('settings_select')
+            .setPlaceholder('Выберите, что хотите сделать...')
+            .addOptions([
+                { label: 'Роль карантина', value: 'setup_ban_role', description: 'Установить роль для забаненных' },
+                { label: 'Роль участника', value: 'setup_member_role', description: 'Установить роль для обычных участников' },
+                { label: 'Канал логов', value: 'setup_log_channel', description: 'Установить канал для уведомлений' },
+                { label: 'Лимит варнов', value: 'setup_max_warnings', description: 'Установить лимит предупреждений' },
+                { label: 'Добавить группу (Роль)', value: 'whitelist_add_role', description: 'Добавить роль в вайтлист' },
+                { label: 'Удалить группу (Роль)', value: 'whitelist_remove_role', description: 'Удалить роль из вайтлиста' },
+                { label: 'Добавить в белый список (Юзер)', value: 'whitelist_add_user', description: 'Добавить пользователя в вайтлист' },
+                { label: 'Удалить из белого списка (Юзер)', value: 'whitelist_remove_user', description: 'Удалить пользователя из вайтлиста' },
+            ])
+    );
+
+    const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+            .setCustomId('back_to_protection')
+            .setLabel('Вернуться к выбору защиты')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('status_dot')
+            .setLabel('.') // Changed from ' ' to '.' to avoid DiscordAPIError
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(true)
+    );
+
+    return { embeds: [embed], components: [selectMenu, buttons] };
+}
 
 export async function execute(interaction: CommandInteraction) {
     if (!interaction.isChatInputCommand()) return;
-
-    const subcommand = interaction.options.getSubcommand();
-    const guildId = interaction.guildId!;
-
-    if (subcommand === 'roles') {
-        const banRole = interaction.options.getRole('ban_role');
-        const memberRole = interaction.options.getRole('member_role');
-
-        const updates: any = {};
-        if (banRole) updates.banRoleId = banRole.id;
-        if (memberRole) updates.memberRoleId = memberRole.id;
-
-        updateSettings(guildId, updates);
-        await interaction.reply({ content: 'Настройки ролей обновлены.', ephemeral: true });
-    }
-    else if (subcommand === 'logs') {
-        const channel = interaction.options.getChannel('channel');
-        if (channel) {
-            updateSettings(guildId, { logChannelId: channel.id });
-            await interaction.reply({ content: `Канал логов установлен: ${channel}`, ephemeral: true });
-        }
-    }
-    else if (subcommand === 'max_warnings') {
-        const count = interaction.options.getInteger('count');
-        if (count !== null) {
-            updateSettings(guildId, { maxWarnings: count });
-            await interaction.reply({ content: `Лимит предупреждений установлен на ${count}.`, ephemeral: true });
-        }
-    }
-    else if (subcommand === 'whitelist') {
-        const role = interaction.options.getRole('role', true);
-        const action = interaction.options.getString('action', true);
-
-        const settings = getSettings(guildId);
-        let whitelist = settings.whitelistRoles;
-
-        if (action === 'add') {
-            if (!whitelist.includes(role.id)) whitelist.push(role.id);
-        } else {
-            whitelist = whitelist.filter(id => id !== role.id);
-        }
-
-        updateSettings(guildId, { whitelistRoles: whitelist });
-        await interaction.reply({ content: `Роль ${role.name} ${action === 'add' ? 'добавлена в' : 'удалена из'} вайтлиста.`, ephemeral: true });
-    }
+    const dashboard = getSettingsDashboard(interaction.guild!);
+    await interaction.reply({ ...dashboard, ephemeral: true });
 }

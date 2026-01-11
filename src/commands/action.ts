@@ -71,7 +71,8 @@ export async function execute(interaction: CommandInteraction) {
     const targetMember = interaction.options.getMember('target') as GuildMember;
 
     const menu = getActionMenu(targetUser, targetMember);
-    const response = await interaction.reply({ ...menu, fetchReply: true });
+    await interaction.reply({ ...menu });
+    const response = await interaction.fetchReply();
 
     // Component Collector to disable buttons after 1 minute
     const collector = response.createMessageComponentCollector({

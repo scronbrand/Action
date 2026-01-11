@@ -123,3 +123,18 @@ export function createUnmuteModal(targetId: string) {
 
     return modal;
 }
+
+export function createSettingsModal(type: string, title: string, label: string) {
+    const modal = new ModalBuilder()
+        .setCustomId(`settings_modal_${type}`)
+        .setTitle(title);
+
+    const input = new TextInputBuilder()
+        .setCustomId('value')
+        .setLabel(label)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+    return modal;
+}
